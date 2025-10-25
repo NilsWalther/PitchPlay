@@ -1,126 +1,151 @@
+# main.py
 from kivy.app import App
-from kivy.uix.screenmanager import ScreenManager, Screen
-from kivy.uix.anchorlayout import AnchorLayout
+from kivy.uix.screenmanager import ScreenManager, Screen, FadeTransition
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
-from kivy.uix.popup import Popup
 from kivy.uix.label import Label
-from kivy.core.text import LabelBase # Schriftarten verwenden
-from modules import play_sounds, note_recognizer, sound_recorder # Eigene Skripte
+from kivy.core.text import LabelBase
+from kivy.uix.popup import Popup
+from kivy.clock import Clock
+import threading
+import os
+from modules import sound_recorder, note_recognizer
 
+# Pfad für gespeicherte Aufnahmen
+audio_pfad = os.path.join("assets", "audio", "recording.wav")
 
-#globale variable
-darkmode = False
-
-# Schriftart einbetten
+# Font initialisieren
 LabelBase.register(
-    name="Roboto", 
+    name="MeineSchrift",
     fn_regular="assets/fonts/Roboto-Regular.ttf",
     fn_bold="assets/fonts/Roboto-Bold.ttf"
 )
 
-# Screens definieren
+# --- Seiten der App ---
+
 class PlayScreen(Screen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-
-        layout = AnchorLayout(
-            anchor_x='center',  # horizontal zentrieren
-            anchor_y='center'      # oben ausrichten
-        )
-        # Button erstellen
-        play_button = Button(
-            background_normal="assets/images/play-button.png",
-            size_hint=(0.4, 0.15),  
-            on_press=lambda x: print()
-        )
-        layout.add_widget(play_button)
-        # Layout dem Screen hinzufügen
+        layout = BoxLayout(orientation='vertical', spacing=15, padding=15)
+        layout.add_widget(Label(text="Wiedergabe (noch leer)", font_size=22, font_name="MeineSchrift"))
+        layout.add_widget(Label(text="Hier kann man Aufnahmen abspielen (gespeicherte).", font_size=16, font_name="MeineSchrift"))
         self.add_widget(layout)
 
-class RecognizeScreen(Screen):
+
+class RecordScreen(Screen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.add_widget(Label(text="Hier kannst du Noten erkennen"))
+        self.recording = False
+
+        self.layout = BoxLayout(orientation='vertical', spacing=15, padding=20)
+        self.info = Label(text="Drücke das Mikrofon, um aufzunehmen", font_size=18, font_name="MeineSchrift")
+        self.layout.add_widget(self.info)
+
+        self.btn = Button(
+            text="Aufnahme starten",
+            size_hint=(1, 0.3),
+            background_color=(1, 0.4, 0.4, 1),
+            font_name="MeineSchrift"
+        )
+        self.btn.bind(on_press=self.toggle_record)
+        self.layout.add_widget(self.btn)
+
+        self.result = Label(text="", font_size=20, font_name="MeineSchrift")
+        self.layout.add_widget(self.result)
+        self.add_widget(self.layout)
+
+    def toggle_record(self, *args):
+        # Aufnahme starten oder stoppen
+        if not self.recording:
+            self.info.text = "Aufnahme läuft..."
+            self.btn.text = "Aufnahme stoppen"
+            self.btn.background_color = (1, 0.2, 0.2, 1)
+            sound_recorder.start_record()
+            self.recording = True
+        else:
+            sound_recorder.stop_record()
+            self.info.text = "Verarbeite Aufnahme..."
+            self.btn.text = "Aufnahme starten"
+            self.btn.background_color = (0.3, 0.8, 0.3, 1)
+            self.recording = False
+            threading.Thread(target=self.analyse_note).start()
+
+    def analyse_note(self):
+        import time
+        time.sleep(0.5)
+        note, freq = note_recognizer.erkenne_note(audio_pfad)
+        if note == "?" or note is None:
+            text = "Keine Note erkannt"
+        else:
+            text = f"Erkannte Note: [b]{note}[/b]\nFrequenz: {freq} Hz"
+        # Text im Haupt-Thread aktualisieren
+        Clock.schedule_once(lambda dt: self.update_result(text))
+
+    def update_result(self, text):
+        self.info.text = "Fertig!"
+        self.result.markup = True
+        self.result.text = text
 
 
 class SettingsScreen(Screen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        layout = BoxLayout(orientation='vertical')
-        layout.add_widget(Label(
-            text="Einstellungen\n",
-            size_hint=(0.8, 0.10)
-        ))# Überschrift
-        layout.add_widget(Button(
-            text="About",
-            on_press=self.show_about,
-            size_hint=(0.8, 0.10),
-            background_normal='',
-            background_color=(0,0,1,1)
-        ))# About btn
-        layout.add_widget(Button(
-        text="toggle\nDark-Mode",
-            on_press=self.toggle_dark_mode,
-            size_hint=(0.8, 0.10),
-            background_normal='',
-            background_color=(0,0,1,1)
-        ))# Darkmode btn
-        
-        self.add_widget(layout) #Layout zum Screen hinzufügen
+        box = BoxLayout(orientation='vertical', spacing=15, padding=15)
+        box.add_widget(Label(text="Einstellungen", font_size=22, font_name="MeineSchrift"))
+
+        btn_about = Button(text="Über die App", size_hint=(1, 0.2), font_name="MeineSchrift")
+        btn_about.bind(on_press=self.show_about)
+        box.add_widget(btn_about)
+
+        btn_exit = Button(text="Beenden", size_hint=(1, 0.2), font_name="MeineSchrift")
+        btn_exit.bind(on_press=lambda x: App.get_running_app().stop())
+        box.add_widget(btn_exit)
+
+        self.add_widget(box)
 
     def show_about(self, *args):
-        popup = Popup(
-            title="About",
-            content=Label(text="Diese App wurde von\n Nils erstellt.\nVersion 1.0"),
-            size_hint=(0.7, 0.4)  
-            )
-        popup.open()
-    
-    def toggle_dark_mode(self, *args):
-        global darkmode
-        darkmode = not darkmode
-        #print(f"darkmode: {darkmode}")
+        pop = Popup(
+            title="Über die App",
+            content=Label(text="Noten-Erkenner v1.0\nErstellt mit Kivy\nvon Nils", font_name="MeineSchrift"),
+            size_hint=(0.8, 0.4)
+        )
+        pop.open()
 
 
-class MyApp(App):
+# --- HauptApp ---
+class NoteApp(App):
     def build(self):
-        main_layout = BoxLayout(orientation='vertical')
-
-        # ScreenManager erstellen
-        self.sm = ScreenManager()
+        self.sm = ScreenManager(transition=FadeTransition())
         self.sm.add_widget(PlayScreen(name="play"))
-        self.sm.add_widget(RecognizeScreen(name="recognize"))
+        self.sm.add_widget(RecordScreen(name="record"))
         self.sm.add_widget(SettingsScreen(name="settings"))
 
-        # Startscreen
-        self.sm.current = "play"
+        # Hauptlayout 
+        root = BoxLayout(orientation='vertical')
 
-        main_layout.add_widget(self.sm)
+        # oben
+        root.add_widget(self.sm)
 
-        # Bottom Bar
-        bottom_bar = BoxLayout(size_hint_y=0.15)
+        # untere Leiste
+        nav = BoxLayout(size_hint_y=0.12, spacing=10, padding=10)
 
-        btn_play = Button(background_normal="assets/images/play-button.png")
-        btn_recognize = Button(background_normal="assets/images/home.png")
-        btn_settings = Button(background_normal="assets/images/setting.png")
+        btn_play = Button(text="", background_normal="assets/images/play-button.png" ,on_press=lambda x: self.switch_to("play"), font_name="MeineSchrift")
+        btn_rec = Button(text="", background_normal="",on_press=lambda x: self.switch_to("record"), font_name="MeineSchrift")
+        btn_set = Button(text="", background_normal="assets/images/setting.png",on_press=lambda x: self.switch_to("settings"), font_name="MeineSchrift")
 
-        buttons: dict = {
-            btn_play: "play",
-            btn_recognize: "recognize",
-            btn_settings: "settings"
-        }
-        # Button Funktionen und an bottom_bar übergeben
-        for btn, screen_name in buttons.items():
-            bottom_bar.add_widget(btn)
-            btn.bind(on_press=lambda x, name=screen_name: self.switch_screen(name))
+        for b in [btn_play, btn_rec, btn_set]:
+            b.font_size = 28
+            b.background_color = (1,1,1,1)
+            nav.add_widget(b)
 
+        root.add_widget(nav)
 
-        main_layout.add_widget(bottom_bar)
-        return main_layout
+        self.sm.current = "record"
+        return root
 
-    def switch_screen(self, screen_name):
-        self.sm.current = screen_name
+    def switch_to(self, name):
+        self.sm.current = name
+
 
 if __name__ == "__main__":
-    MyApp().run()
+    NoteApp().run()
